@@ -1,0 +1,13 @@
+syntax = "proto3";
+package prob;
+option go_package = "../prob";
+
+message FakeMessage {
+  string email = 1;
+  string ip = 2;
+  string username = 3;
+  string rfc3339 = 4;
+  int64 unix = 5;
+  string uuid = 6;
+  uint32 ran = 7;
+}

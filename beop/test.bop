@@ -1,0 +1,10 @@
+
+struct FakeMessage {
+    string Email;
+    string Ip;
+    string Username;
+    string Rfc3339;
+    int64 Unix;
+    string Uuid;
+    uint32 Ran;
+}
