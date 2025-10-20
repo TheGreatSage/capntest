@@ -71,7 +71,8 @@ func MarshalThree(m *capnp.Message, buf []byte) (int, error) {
 			buf[int((i+1)*4):int((i+2)*4)],
 			uint32(len(seg.Data())/int(wordSize)),
 		)
-		ln = copy(buf[off:off+ln], seg.Data())
+		ln = len(seg.Data())
+		copy(buf[off:off+ln], seg.Data())
 		off += ln
 	}
 

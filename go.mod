@@ -13,9 +13,9 @@ require (
 	github.com/colega/zeropool v0.0.0-20230505084239-6fb4a4f75381 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/text v0.30.0 // indirect
 )
 
-//replace capnproto.org/go/capnp/v3 =>../../github/go-capnp
+//replace capnproto.org/go/capnp/v3 => ../../github/go-capnp
 
-replace capnproto.org/go/capnp/v3 => github.com/TheGreatSage/go-capnp/v3 v3.1.0-sage
+replace capnproto.org/go/capnp/v3 => github.com/TheGreatSage/go-capnp/v3 v3.1.2-sage

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
+	"io"
 	"log"
 	// "os"
 	"testing"
@@ -272,6 +275,65 @@ func deserializeCheck(tb testing.TB, cpn *cpnp.FakeMessage, fks *FakeSage, err e
 		log.Printf("Bad Rand: %d vs %d", cpn.Ran(), fks.Rand)
 		tb.FailNow()
 	}
+	if !cpn.IsValid() {
+		log.Println("Bad IsVlaid")
+		tb.FailNow()
+	}
+}
+
+func TestCapnpMarshals(t *testing.T) {
+	msg := newMessage(t)
+	reuse := NewCReuse()
+	t.Run("Capnp Marshal", func(t *testing.T) {
+		data, err := msg.Cpn.Marshal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkAllCapnpDeserialize(t, reuse, msg.Fake, data)
+	})
+	// t.Run("Capnp MarshalTo", func(tt *testing.T) {
+	// 	tt.Skip("This function doesn't actually work it seems.")
+	// 	buf := make([]byte, 8*1024)
+	// 	buf, err := msg.Cpn.MarshalTo(buf)
+	// 	if err != nil {
+	// 		tt.Log("MarshalTo Error")
+	// 		tt.Fatal(err)
+	// 	}
+	// 	checkAllCapnpDeserialize(tt, reuse, msg.Fake, buf)
+	// })
+	t.Run("Capnp MarshalThree", func(t *testing.T) {
+		buf := make([]byte, 8*1024)
+		_, err := msg.Cpn.MarshalThree(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkAllCapnpDeserialize(t, reuse, msg.Fake, buf)
+	})
+	t.Run("Capnpext MarshalTo", func(t *testing.T) {
+		buf := make([]byte, 8*1024)
+		_, err := capnpext.MarshalTo(msg.Cpn, buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkAllCapnpDeserialize(t, reuse, msg.Fake, buf)
+	})
+	t.Run("Capnpext MarshalThree", func(t *testing.T) {
+		buf := make([]byte, 8*1024)
+		_, err := capnpext.MarshalThree(msg.Cpn, buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkAllCapnpDeserialize(t, reuse, msg.Fake, buf)
+	})
+}
+
+func checkAllCapnpDeserialize(t *testing.T, reuse *CapnpReuse, check *FakeSage, data []byte) {
+	d1, err := Deserialize(reuse, data, cpnp.ReadRootFakeMessage)
+	deserializeCheck(t, &d1, check, err)
+	d2, err := DeserializeZero(reuse, data, cpnp.ReadRootFakeMessage)
+	deserializeCheck(t, &d2, check, err)
+	d3, err := DeserializeZeroTo(reuse, data, cpnp.ReadRootFakeMessage)
+	deserializeCheck(t, &d3, check, err)
 }
 
 func BenchmarkMarshal(b *testing.B) {
@@ -310,11 +372,11 @@ func BenchmarkMarshal(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			msg := fk
-			buf, err := msg.MarshalThree(buf)
+			m, err := msg.MarshalThree(buf)
 			if err != nil {
 				b.Fatal(err)
 			}
-			if len(buf) == 0 {
+			if m == 0 {
 				b.Fail()
 			}
 		}
@@ -369,4 +431,88 @@ func BenchmarkMarshal(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkMarshalThreeStream
+// A full test using MarshalThree and UnmarshalThree.
+//
+// Writes to io.Writer then Reads and deserializes the message.
+func BenchmarkMarshalThreeStream(b *testing.B) {
+	msg := newMessage(b)
+	fk := msg.Cpn
+	buffer := make([]byte, 8*1024)
+	stream := new(bytes.Buffer)
+	stream.Grow(8 * 1024)
+
+	msgBuf, _ := capnp.NewSingleSegmentMessage(nil)
+
+	readBuffer := make([]byte, 8*1024)
+
+	type packetHeader struct {
+		Id  uint16
+		Len uint32
+	}
+
+	const packetHeaderLength = 6
+
+	var header [packetHeaderLength]byte
+	var pheader packetHeader
+
+	b.ReportAllocs()
+	for b.Loop() {
+		// Not resetting stream fails test.
+		stream.Reset()
+
+		buf := buffer[:cap(buffer)]
+		payload := buf[packetHeaderLength:]
+		n, err := fk.MarshalThree(payload)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// Pretend this is an actual stream
+
+		binary.LittleEndian.PutUint16(buf[0:2], uint16(0xFF))
+		binary.LittleEndian.PutUint32(buf[2:packetHeaderLength], uint32(n))
+		_, err = stream.Write(buf[:n+packetHeaderLength])
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// Have to read the header first
+		// binary.Read actually doers an alloc so have to do this.
+		_, err = io.ReadFull(stream, header[:])
+		if err != nil {
+			b.Fatal(err)
+		}
+		pheader.Id = binary.LittleEndian.Uint16(header[:2])
+		pheader.Len = binary.LittleEndian.Uint32(header[2:6])
+
+		if pheader.Id != uint16(0xFF) {
+			b.Fatal("Wrong packet ID", pheader.Id)
+		}
+
+		n, err = stream.Read(readBuffer)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		err = capnp.UnmarshalZeroThree(msgBuf, readBuffer[:n])
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		fake, err := cpnp.ReadRootFakeMessage(msgBuf)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if !fake.IsValid() {
+			b.Fatal("message not valid")
+		}
+
+		if fake.Ran() != msg.Fake.Rand {
+			b.Fatal("fake message not valid")
+		}
+	}
 }
